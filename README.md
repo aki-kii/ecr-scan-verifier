@@ -227,11 +227,12 @@ const sbomEncryptionKey = new Key(this, 'SbomEncryptionKey');
 
 new EcrScanVerifier(this, 'Scanner', {
   repository,
-  scanConfig: ScanConfig.enhanced(),
-  sbomOutput: SbomOutput.cycloneDx14({
-    bucket: sbomBucket,
-    prefix: 'sbom/', // Optional
-    encryptionKey: sbomEncryptionKey,
+  scanConfig: ScanConfig.enhanced({
+    sbomOutput: SbomOutput.cycloneDx14({
+      bucket: sbomBucket,
+      prefix: 'sbom/', // Optional
+      encryptionKey: sbomEncryptionKey,
+    }),
   }),
 });
 ```
