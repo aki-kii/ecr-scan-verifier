@@ -47,7 +47,7 @@ It calls two ECR APIs:
 Field combinations worth spelling out:
 
 | Combination | Registry | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `appliedScanFilters` empty + `scanFrequency: MANUAL` | ENHANCED | Not covered by any filter → never scanned. **This is the fail-fast trigger** (verified against the real API, see below). |
 | `appliedScanFilters` non-empty + `scanFrequency: MANUAL` | ENHANCED | Contradiction — Enhanced filter rules can only be `SCAN_ON_PUSH` / `CONTINUOUS_SCAN`, so a matched rule implies an automatic frequency. Should not occur; treated as covered (keep polling). |
 | `appliedScanFilters` non-empty + `scanFrequency: MANUAL` | BASIC | **Legitimate state**: BASIC filter rules can be `SCAN_ON_PUSH` or `MANUAL`, and a matched `MANUAL` rule means "manual scanning only". The BASIC branch does not read `appliedScanFilters`; it reads the effective `scanOnPush` (`false` here), which handles this state correctly. |
@@ -61,7 +61,7 @@ fail-fast — it degrades to the old polling behavior instead.
 ## When the check does NOT run
 
 | Case | Behavior (unchanged from previous versions) |
-|---|---|
+| --- | --- |
 | Scan results already exist | First poll succeeds; the check never executes. A repository scanned manually in the past therefore keeps working even with `scanOnPush: false`. |
 | `ScanConfig.basic()` (`startScan: true`, default) | The construct starts the scan itself via `StartImageScan`; a transient `ScanNotFoundException` right after starting is just propagation lag. |
 | `ScanConfig.signatureOnly()` | No scanning at all. |
@@ -70,7 +70,7 @@ fail-fast — it degrades to the old polling behavior instead.
 ## Decision table
 
 | # | ScanConfig | Registry scan type | Repository state | Behavior |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1 | `enhanced()` | ENHANCED | Covered: `appliedScanFilters` non-empty, or `scanFrequency` is `SCAN_ON_PUSH` / `CONTINUOUS_SCAN` | **Keep polling** — "scan has not started yet" is the normal case for a fresh push |
 | 2 | `enhanced()` | ENHANCED | Not covered: `appliedScanFilters` empty **and** `scanFrequency` is neither `SCAN_ON_PUSH` nor `CONTINUOUS_SCAN` (observed: `MANUAL`) | **Fail immediately**: `Repository 'X' is not covered by any Enhanced scanning filter...` |
 | 3 | `enhanced()` | BASIC | — (registry scan type alone is decisive) | **Fail immediately**: `Enhanced scanning (Amazon Inspector) is not enabled for this registry...` |
@@ -88,11 +88,49 @@ Any state that does not *definitively* prove non-coverage falls back to the prev
 behavior (keep polling; eventually the pre-existing `polling timeout` error):
 
 | Situation | Behavior |
-|---|---|
+| --- | --- |
 | Configuration API call fails (throttling, permissions, ...) | Warn log + keep polling |
 | `BatchGetRepositoryScanningConfiguration` returns a `failures` entry | Warn log + keep polling |
 | Registry scan type missing / unknown value | Warn log + keep polling |
 | Contradictory response (e.g. `appliedScanFilters` empty but `scanFrequency: CONTINUOUS_SCAN`) | Treated as covered; keep polling |
+
+## Terminal scan statuses
+
+A sibling fail-fast mechanism, mechanically simpler than the coverage check: some
+`imageScanStatus.status` values returned by `DescribeImageScanFindings` are decisive
+on their own, with no configuration inference needed
+([#25](https://github.com/go-to-k/ecr-scan-verifier/issues/25)).
+
+| Status | Behavior |
+| --- | --- |
+| `COMPLETE` / `ACTIVE` | Success — return findings |
+| `FAILED` / `UNSUPPORTED_IMAGE` | Fail immediately (pre-existing behavior) |
+| `SCAN_ELIGIBILITY_EXPIRED` | **Fail immediately** — the image is older than Amazon Inspector's ECR re-scan duration, so its findings are no longer available. Remedy: push the image again, or extend the re-scan duration (`aws inspector2 update-configuration`). |
+| `IMAGE_ARCHIVED` | **Fail immediately** — archived images cannot be scanned or pulled. Remedy: restore the image to the active tier. Failing here surfaces the problem with a clear message *before* the deployment reaches ECS, where the same image would otherwise fail as an opaque `CannotPullContainerError` crash-loop at task launch. |
+| Anything else (`PENDING`, `IN_PROGRESS`, `FINDINGS_UNAVAILABLE`, ...) | Keep polling |
+
+Notes:
+
+- With `pullDateRescanMode: LAST_IN_USE_AT`, pulling the image again can revive
+  monitoring, so `SCAN_ELIGIBILITY_EXPIRED` is not strictly permanent — but waiting
+  for that to happen spontaneously during a deployment is pointless; failing with the
+  remedy is the right behavior.
+- Both fail-fast statuses describe states that cannot arise or heal spontaneously
+  within a deployment's polling window (aging past the re-scan window and archival
+  are slow, externally-driven transitions), so a wrong fail-fast is not possible if
+  the statuses mean what they say. Their exact real-API behavior is still unverified
+  (reproducing either requires an aged or archived image); if a status never actually
+  appears, the branch is simply dead code and behavior is unchanged.
+- `FINDINGS_UNAVAILABLE` is deliberately **not** a fail-fast status: it may plausibly
+  appear transiently between scan completion and findings propagation (failing there
+  would break healthy deployments), and even when terminal its cause is ambiguous, so
+  no actionable remedy could be offered. Re-evaluate if real-world observations
+  clarify its semantics.
+- An image that was **never scanned** and is already outside the re-scan window has
+  been observed to report `PENDING` forever (2026-07-22 integ incident). `PENDING` is
+  also the legitimate warming-up state, so it cannot be used for fail-fast;
+  distinguishing this case would require `inspector2 ListCoverage` (future
+  enhancement).
 
 ## Design principles
 
@@ -155,7 +193,7 @@ Granted by the construct only when the check can run
 (`startScan: false` and not `SIGNATURE_ONLY`):
 
 | Action | Resource |
-|---|---|
+| --- | --- |
 | `ecr:BatchGetRepositoryScanningConfiguration` | repository ARN |
 | `ecr:GetRegistryScanningConfiguration` | `*` (registry-level API) |
 
