@@ -104,6 +104,69 @@ describe('sbom-export', () => {
       expect(createCall.args[0].input.reportFormat).toBe('SPDX_2_3');
     });
 
+    test('should not set a key prefix when no prefix is given', async () => {
+      inspectorMock.on(CreateSbomExportCommand).resolves({
+        reportId: 'report-no-prefix',
+      });
+      inspectorMock.on(GetSbomExportCommand).resolves({
+        status: 'SUCCEEDED',
+        s3Destination: {
+          bucketName: 'test-bucket',
+          keyPrefix: 'report.json',
+        },
+      });
+      s3Mock.on(ListObjectsV2Command).resolves({
+        Contents: [{ Key: 'report.json' }],
+      });
+      s3Mock.on(GetObjectCommand).resolves({
+        Body: createMockStream('{}'),
+      });
+
+      await exportSbom(
+        'my-repo',
+        'v1.0',
+        'CYCLONEDX_1_4',
+        'test-bucket',
+        'arn:aws:kms:us-east-1:123456789012:key/test-key',
+        mockLogger,
+      );
+
+      const createCall = inspectorMock.commandCalls(CreateSbomExportCommand)[0];
+      expect(createCall.args[0].input.s3Destination?.keyPrefix).toBeUndefined();
+    });
+
+    test('should use the given key prefix', async () => {
+      inspectorMock.on(CreateSbomExportCommand).resolves({
+        reportId: 'report-custom-prefix',
+      });
+      inspectorMock.on(GetSbomExportCommand).resolves({
+        status: 'SUCCEEDED',
+        s3Destination: {
+          bucketName: 'test-bucket',
+          keyPrefix: 'custom/prefix',
+        },
+      });
+      s3Mock.on(ListObjectsV2Command).resolves({
+        Contents: [{ Key: 'custom/prefix/report.json' }],
+      });
+      s3Mock.on(GetObjectCommand).resolves({
+        Body: createMockStream('{}'),
+      });
+
+      await exportSbom(
+        'my-repo',
+        'v1.0',
+        'CYCLONEDX_1_4',
+        'test-bucket',
+        'arn:aws:kms:us-east-1:123456789012:key/test-key',
+        mockLogger,
+        'custom/prefix',
+      );
+
+      const createCall = inspectorMock.commandCalls(CreateSbomExportCommand)[0];
+      expect(createCall.args[0].input.s3Destination?.keyPrefix).toBe('custom/prefix');
+    });
+
     test('should include imageTag in resource filter', async () => {
       inspectorMock.on(CreateSbomExportCommand).resolves({
         reportId: 'report-789',

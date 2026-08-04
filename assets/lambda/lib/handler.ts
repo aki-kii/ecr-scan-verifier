@@ -153,6 +153,7 @@ export const handler: CdkCustomResourceHandler = async function (event) {
         props.sbom.bucketName,
         props.sbom.kmsKeyArn,
         logger,
+        props.sbom.prefix,
       );
       sbomContent = {
         content: sbomResult.sbomContent,

@@ -24,6 +24,7 @@ export const exportSbom = async (
   s3BucketName: string,
   kmsKeyArn: string,
   logger: Logger,
+  sbomKeyPrefix?: string,
 ): Promise<SbomExportResult> => {
   const reportFormat =
     sbomFormat === 'SPDX_2_3' ? SbomReportFormat.SPDX_2_3 : SbomReportFormat.CYCLONEDX_1_4;
@@ -43,7 +44,7 @@ export const exportSbom = async (
       reportFormat,
       s3Destination: {
         bucketName: s3BucketName,
-        keyPrefix: `sbom-exports/${repositoryName}`,
+        keyPrefix: sbomKeyPrefix,
         kmsKeyArn,
       },
       resourceFilterCriteria,

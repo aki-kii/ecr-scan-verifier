@@ -408,6 +408,7 @@ describe('handler', () => {
       'sbom-bucket',
       undefined,
       expect.anything(),
+      undefined,
     );
     expect(s3Output.outputScanLogsToS3).toHaveBeenCalledWith(
       expect.any(String),
@@ -416,6 +417,43 @@ describe('handler', () => {
       'my-repo:v1.0',
       { content: '{"bomFormat": "CycloneDX"}', format: 'CYCLONEDX_1_4' },
       expect.anything(),
+    );
+  });
+
+  test('should pass sbom prefix to exportSbom when prefix is configured', async () => {
+    const mockEnhancedScanFindings: ecrScan.ScanFindings = {
+      ...mockScanFindings,
+      scanType: 'ENHANCED',
+    };
+    (ecrScan.startAndWaitForScan as jest.Mock).mockResolvedValue(mockEnhancedScanFindings);
+    (sbomExport.exportSbom as jest.Mock).mockResolvedValue({
+      sbomContent: '{"bomFormat": "CycloneDX"}',
+      format: 'CYCLONEDX_1_4',
+    });
+
+    const event = {
+      ...baseEvent,
+      ResourceProperties: {
+        ...baseEvent.ResourceProperties,
+        scanType: 'ENHANCED',
+        sbom: {
+          format: 'CYCLONEDX_1_4',
+          bucketName: 'sbom-bucket',
+          prefix: 'custom-prefix',
+        },
+      },
+    };
+
+    await handler(event, mockContext, mockCallback);
+
+    expect(sbomExport.exportSbom).toHaveBeenCalledWith(
+      'my-repo',
+      'v1.0',
+      'CYCLONEDX_1_4',
+      'sbom-bucket',
+      undefined,
+      expect.anything(),
+      'custom-prefix',
     );
   });
 
